@@ -15,20 +15,405 @@
 	</head>
   <body></body>
   <script>
-		/*******************************************************************************************************/
-		/* TheEddie                                                                                            */
-		/* Created by goodeddie                                                                                */
-		/* Started 2012                                                                                        */
-		/*                                                                                                     */
-		/* Credits to the Akihabara game engine (the engine this game is based off of) by kesiev               */
-		/*                                                                                                     */
-		/*                                                                                                     */
-		/*******************************************************************************************************/
-		
-		/*******************************************************************************************************/
-		/* CREATE GLOBAL VARIABLE TO HOLD ALL GAME INFO                                                        */
-		/*******************************************************************************************************/
+/*******************************************************************************************************/
+/* TheEddie                                                                                            */
+/* Created by goodeddie                                                                                */
+/* Started 2012                                                                                        */
+/*                                                                                                     */
+/* Credits to the Akihabara game engine (the engine this game is based off of) by kesiev               */
+/*                                                                                                     */
+/*                                                                                                     */
+/*******************************************************************************************************/
+
+/*******************************************************************************************************/
+/** CREATE GLOBAL VARIABLES TO HOLD ALL GAME INFO                                                       */
+/*******************************************************************************************************/
 		var maingame;
+		var tilemaps={};
+		var dialogues={};
+		var credits={};
+		var noface; // Is a fake "actor" in dialogues. The text is ever in the same place.
+		var audioserver;
+		
+		// In games like Zelda, object are alive also outside of the screen.
+		// So, let's calculate a distance threshold from the camera
+		function objectIsAlive(th) {
+			return trigo.getDistance(th,gbox.getCamera())<800;
+		}
+		
+/*******************************************************************************************************/
+/** THIS IS THE MAIN FUNCTION                                                                           */
+/** OVERRIDE GO FUNCTION                                                                                */
+/*******************************************************************************************************/
+		function go() {
+		 	gbox.setGroups(["background","player","bonus","foes","walls","playerbullets","foesbullets","sparks","foreground","gamecycle"]);
+			gbox.setAudioChannels({bgmusic:{volume:0.8},sfx:{volume:1.0}});
+			
+			// player, walls, bullets and foes are under z-index layer
+			gbox.setRenderOrder(["background",gbox.ZINDEX_LAYER,"sparks","foreground","gamecycle"]);
+				
+			maingame=gamecycle.createMaingame("gamecycle","gamecycle");
+			
+			// Title intro
+		  maingame.gameTitleIntroAnimation=function(reset) {
+				if (reset) {
+					gbox.playAudio("default-music");
+					toys.resetToy(this,"rising");
+				} else {
+					gbox.blitFade(gbox.getBufferContext(),{alpha:1,color:"rgb(150,150,150)"});
+					toys.logos.rising(this,"rising",{image:"logo",x:gbox.getScreenHW()-gbox.getImage("logo").hwidth,y:20,speed:1,gapx:250,reflex:0.1,audioreach:"coin"});
+				}
+			},
+			
+			// Disable the default "Let's begin" screen.
+			maingame.gameIntroAnimation = function() { return true; };
+			// No end level animation.
+			maingame.endlevelIntroAnimation=function() { return true; }
+			
+			// Level animation - show this animation each time you change the level.
+			maingame.levelIntroAnimation=function(reset) {
+				if (reset) {
+					toys.resetToy(this,"default-blinker");
+				} else {
+					gbox.blitFade(gbox.getBufferContext(),{alpha:1});
+					return toys.text.fixed(this,"default-blinker",gbox.getBufferContext(),{font:"big",text:maingame.getNextLevel().label,valign:gbox.ALIGN_MIDDLE,halign:gbox.ALIGN_CENTER,dx:0,dy:0,dw:gbox.getScreenW(),dh:gbox.getScreenH(),time:50});
+				}
+			}
+			
+			// Game is over forever, if the player dies for the first time. No life check, since there is health is split.
+			maingame.gameIsOver=function() { return true; }
+			// Game ending
+		  maingame.gameEndingIntroAnimation=function(reset){
+		  	if (reset) {
+		  		toys.resetToy(this,"intro-animation");
+		  	} else {
+		  		gbox.blitFade(gbox.getBufferContext(),{alpha:1});
+		  		return toys.dialogue.render(this,"intro-animation",credits.titles);
+		  	}
+		  }
+			
+			// Game events are decided by the map.
+			maingame.gameEvents=function() {
+				tilemaps.map.mapActions();
+			}
+			
+/*******************************************************************************************************/
+/**** CHANGE LEVEL FUNCTION                                                                               */
+/*******************************************************************************************************/
+			maingame.changeLevel=function(level) {
+				// Clean up the level
+				gbox.trashGroup("playerbullets");
+				gbox.trashGroup("foesbullets");
+				gbox.trashGroup("foes");
+				gbox.trashGroup("bonus");
+				gbox.trashGroup("walls");
+				gbox.purgeGarbage(); // Since we're starting, we can purge all now
+				
+				// Start first level
+				if (level==null)
+					level={level:"begin",x:300,y:270,introdialogue:true}; // First stage
+				
+				// Dialogues are emptied - will be loaded by bundles. Cache is not needed - each bundle
+				//  contains full dialogues for the floor.
+				dialogues={};
+				
+				// Map data is wiped too. Will be loaded by loadBundle. Other data in tilemaps is
+				// kept (i.e. quest status etc)
+				delete tilemaps.map;
+				
+				// Here the map is loaded. During the load time, the game is still.
+				gbox.addBundle({
+					file:"resources/maps/bundle-map-"+level.level+".js",
+					onLoad:function(){ // This "onload" operation is triggered after everything is loaded.
+						help.finalizeTilemap(tilemaps.map); // Finalize the map into the bundle
+						gbox.createCanvas("tileslayer",{w:tilemaps.map.w,h:tilemaps.map.h}); // Prepare map's canvas
+						gbox.blitTilemap(gbox.getCanvasContext("tileslayer"),tilemaps.map); // Render map on the canvas
+						toys.topview.spawn(gbox.getObject("player","player"),{x:level.x,y:level.y}); // Displace player
+							tilemaps.map.addObjects(); // Initialize map
+							
+							// Use this if you want to have an intro dialog in the level
+							if (level.introdialogue) // Eventually starts intro dialogue.
+								maingame.startDialogue("intro"); // game introduction, if needed
+					}
+				});
+			}
+			
+/*******************************************************************************************************/
+/**** GAME INITIALIZATION FUNCTION                                                                     */
+/*******************************************************************************************************/
+			maingame.initializeGame=function() {
+				// Prepare Heads up display
+				maingame.hud.setWidget("weapon", {widget: "radio", value: 0, tileset: "items", frames: [0], dx: 10, dy: 10});
+				maingame.hud.setWidget("health", {widget: "symbols", tiles: [3,2,1,0], minvalue: 0, maxvalue: 20, value: 12 - (maingame.difficulty * 4), maxshown: 4,tileset: "hud", emptytile: 4,dx: 40, dy: 10, gapx: 20, gapy: 0});
+				maingame.hud.setWidget("money", {widget: "label", font: "small", value: 0, minvalue: 0, maxvalue: 100, dx: gbox.getScreenW() - 60, dy: gbox.getScreenH() - 24, prepad: 3, padwith: " ", clear: true});
+				//maingame.hud.setWidget("SMALLKEY", {widget: "label", font: "small", value: 0, minvalue: 0, maxvalue: 999, dx: gbox.getScreenW() - 60, dy: gbox.getScreenH() - 43, prepad: 3, padwith: " ", clear: true});
+				//maingame.hud.setWidget("BOSSKEY", {widget: "bool", value: 0, tileset: "hud", frame: 5, dx: gbox.getScreenW() - 30, dy: gbox.getScreenH() - 66}); // This is shown if value is true or >0		
+				
+				maingame.hud.setWidget("lblkey", {widget: "blit", value: 6,tileset: "hud", dx:gbox.getScreenW()-30, dy:gbox.getScreenH()-50});
+				maingame.hud.setWidget("lblcoin", {widget: "blit", value: 7,tileset: "hud", dx:gbox.getScreenW()-30, dy:gbox.getScreenH()-30});
+				
+				tilemaps={
+					_defaultblock: 100, // The block that is over the borders (a wall)
+					queststatus: {} // Every step the player does, is marked here (opened doors, sections cleared etc)
+				};
+				
+/*******************************************************************************************************/
+/****** ADD BACKGROUND                                                                                 */
+/*******************************************************************************************************/
+				gbox.addObject({
+					id: "background_id",
+					group: "background",
+					blit: function() {
+						// Center the camera on the player object. The map.w and map.h data tells the camera when it's hit the edge of the map so it stops scrolling.
+						// Used for no dead zones and constant following
+						//gbox.centerCamera(gbox.getObject("player","player_id"),{w:tilemaps.map.w,h:tilemaps.map.h});
+						// Used for dead zones and only follow when outside of dead zone
+						followCamera(gbox.getObject('player', 'player_id'), {w:tilemaps.map.w, h:tilemaps.map.h});
+						
+						gbox.blit(gbox.getBufferContext(), gbox.getCanvas("tileslayer"), {dx: 0, dy: 0, dw: gbox.getScreenW(), dh: gbox.getScreenH(), sourcecamera: true});
+					}
+				});
+
+/*******************************************************************************************************/
+/****** ADD PLAYER                                                                                     */
+/*******************************************************************************************************/				
+				gbox.addObject({
+					id: "player_id",
+					group: "player",
+					tileset: "player",
+					zindex: 0, // Needed for zindexed objects
+					stilltimer: 0, // is used to block the player while attacking (a la zelda!)
+					invultimer: 0, // Custom attribute. A timer that keep invulnerable.
+					isPaused: false, // Pauses the player during dialogues, cutscenes etc.
+					
+					doPause:function(p) {
+						this.isPaused = p;
+					},
+					
+					initialize:function() {
+						toys.topview.initialize(this, {
+							haspushing: true,
+							shadow:{tileset: "shadows", tile: 0},
+							frames:{
+								standup:{ speed:1, frames:[0] },
+								standdown:{ speed:1, frames:[3] },
+								standleft:{ speed:1, frames:[6] },
+								standright:{ speed:1, frames:[6] },
+								movingup:{speed:3,frames:[0,1,0,2] },
+								movingdown:{speed:3,frames:[3,4,3,5] },
+								movingleft:{speed:3,frames:[6,7] },
+								movingright:{speed:3,frames:[6,7] },
+								pushingup:{speed:6,frames:[0,1,0,2] },
+								pushingdown:{speed:6,frames:[3,4,3,5] },
+								pushingleft:{speed:6,frames:[6,7] },
+								pushingright:{speed:6,frames:[6,7] }
+							}
+						});
+					},
+					
+					collisionEnabled:function() { // Disable collisions when the game is on hold, the player is dead or invulnerable
+						return !maingame.gameIsHold()&&!this.killed&&!this.invultimer&&!this.isPaused;
+					},
+					
+					hitByBullet:function(by) {
+						if (this.collisionEnabled()) { // If collison are enabled...
+							maingame.hud.addValue("health","value",-by.power); // Decrease power
+							if (maingame.hud.getValue("health","value")<=0) // If dead..
+								this.kill(); // Kill...
+							else { // Else is just hit
+								gbox.hitAudio("hurt");
+								this.accz=-5; // A little jump...
+								this.invultimer=30; // Stay invulnerable for a while...
+								this.stilltimer=10; // Stay still for a while...
+							}
+							return by.undestructable; // Destroy or not a bullet (decided by the bullet itself)
+						} else return true; // Bullets are ignored
+					},
+					
+					kill:function(by){
+						gbox.hitAudio("die");
+						this.frame=8;
+						this.accz=-8;
+						maingame.addSmoke(this,"flame-red");
+						this.killed=true;
+						maingame.playerDied({wait:50});
+					},
+					
+					attack:function() {
+						gbox.hitAudio("sword");
+
+						this.stilltimer=10; // Stay still for a while
+						this.frame=(this.facing==toys.FACE_UP?9:(this.facing==toys.FACE_DOWN?10:11));
+						
+						switch (maingame.hud.getValue("weapon","value")) {
+							case 0: { // Sword
+								toys.topview.fireBullet("playerbullets",null,{
+									fullhit:true,
+									collidegroup:"foes",
+									undestructable:true, // Custom attribute. Is not destroyed by the hitted object.
+									power:1, // Custom attribute. Is the damage value of this weapon.
+									from:this,
+									sidex:this.facing,
+									sidey:this.facing,
+									tileset:((this.facing==toys.FACE_LEFT)||(this.facing==toys.FACE_RIGHT)?"lefthit":"uphit"),
+									frames:{speed:1,frames:[0,1,2,3]},
+									duration:4,
+									acc:5,
+									fliph:(this.facing==toys.FACE_RIGHT),
+									flipv:(this.facing==toys.FACE_DOWN),
+									angle:toys.FACES_ANGLE[this.facing]
+								});
+								break;
+							}
+							case 1: { // Arrows
+								toys.topview.fireBullet("playerbullets",null,{
+									_canhitswitch:true, // Arrows can hit switchs and turn them on
+									fullhit:true,
+									collidegroup:"foes",
+									map:tilemaps.map, // Map is specified, since collides with walls
+									mapindex:"map",
+									defaulttile:tilemaps._defaultblock,
+									undestructable:false, // Custom attribute. Is destroyed by the hitted object.
+									power:2, // Custom attribute. Is the damage value of this weapon.
+									from:this,
+									sidex:this.facing,
+									sidey:this.facing,
+									tileset:((this.facing==toys.FACE_LEFT)||(this.facing==toys.FACE_RIGHT)?"leftarrow":"uparrow"),
+									frames:{speed:1,frames:[0,1]},
+									acc:5,
+									fliph:(this.facing==toys.FACE_RIGHT),
+									flipv:(this.facing==toys.FACE_DOWN),
+									angle:toys.FACES_ANGLE[this.facing],
+									spritewalls:"walls",
+									gapy:8 // Avoid wall collision on start
+								}); 
+								break;
+							}
+						}
+						
+					},
+					
+					first:function() {
+						if (this.stilltimer) this.stilltimer--;
+						if (this.invultimer) this.invultimer--;
+						
+						// Counter
+						this.counter=(this.counter+1)%60;
+						if (this.stilltimer||maingame.gameIsHold()||this.isPaused||this.killed)
+							toys.topview.controlKeys(this,{}); // Stays still. No key is moving! :)
+						else
+							toys.topview.controlKeys(this,{left:"left",right:"right",up:"up",down:"down"}); // Moves (if not attacking)
+						toys.topview.handleAccellerations(this);
+						toys.topview.handleGravity(this); // z-gravity					
+						toys.topview.applyForces(this); // Apply forces
+						toys.topview.applyGravity(this); // z-gravity
+						toys.topview.tileCollision(this,tilemaps.map,"map",tilemaps._defaultblock); // tile collisions
+						toys.topview.floorCollision(this); // Collision with the floor (for z-gravity)
+						toys.topview.spritewallCollision(this,{group:"walls"}); // Doors and tresaure chests are sprites that acts like a wall.
+						toys.topview.adjustZindex(this);
+						if (!this.stilltimer&&!this.killed) toys.topview.setFrame(this); // set the right animation frame (if not attacking)
+						
+						if (!this.stilltimer&&!this.isPaused&&!maingame.gameIsHold()&&!this.killed)
+							if (gbox.keyIsHit("a"))
+								this.attack();
+							else if (gbox.keyIsHit("b")) {
+								var ahead=toys.topview.getAheadPixel(this,{distance:5});
+								ahead.group="walls";
+								ahead.call="doPlayerAction";
+								if (!toys.topview.callInColliding(this,ahead)) {// if any action is done
+									if (maingame.hud.getValue("weapon","frames").length>1)
+										gbox.hitAudio("default-menu-option");
+									maingame.hud.addValue("weapon","value",1);
+								}
+							}
+						
+					},
+					
+					blit:function() {
+						if ((this.invultimer%2)==0) {
+							// Shadowed object. First draws the shadow...
+							gbox.blitTile(gbox.getBufferContext(),{tileset:this.shadow.tileset,tile:this.shadow.tile,dx:this.x,dy:this.y+this.h-gbox.getTiles(this.shadow.tileset).tileh+4,camera:this.camera});
+							// Then the object. Notes that the y is y+z to have the "over the floor" effect.
+							gbox.blitTile(gbox.getBufferContext(),{tileset:this.tileset,tile:this.frame,dx:this.x,dy:this.y+this.z,camera:this.camera,fliph:this.fliph,flipv:this.flipv});
+						}
+					}
+				}); // End gbox.addobject player
+			};// End maingame.initializegame
+		
+			gbox.go();
+		}
+		
+/*******************************************************************************************************/
+/* ADD BACKGROUND                                                                                      */
+/*******************************************************************************************************/
+		gbox.onLoad(function () {
+			help.akihabaraInit({title:"The Legend Of Sadness",splash:{footnotes:["Musics by: Greenleo, Graulund, Robert Jaret.","Full credits on ending title."]}});
+
+			// We are not going to use faces for dialogues
+			noface={ noone:{ x:10, y:170,box:{x:0,y:160,w:gbox.getScreenW(),h:60,alpha:0.5} } };
+			
+			audioserver="resources/audio/"
+
+			gbox.addBundle({file:"resources/bundlesjs/bundle.js"}); // Audio, sprites, fonts etc. are loaded here now. Cleaner code! Btw you can still load resources from the code, like in Capman.
+			
+			gbox.loadAll(go);
+		}, false); // End gbox.onLoad
+
+	</script>
+</html>
+	
+	
+	
+	
+	
+	
+	
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+		
+	<script>
 		var map;
 		var frameCount = 0; // Used to regulate frame skipping
 		var pathMap;
@@ -135,6 +520,10 @@
 				if (reset) {
 					// Reset a local data store called 'rising' in the this(maingame) object
 					toys.resetToy(this, 'rising');
+				}
+				else {
+					gbox.blitFade(gbox.getBufferContext(),{alpha:1,color:"rgb(150,150,150)"});
+					toys.logos.rising(this,"rising",{image:"logo",x:gbox.getScreenHW()-gbox.getImage("logo").hwidth,y:20,speed:1,gapx:250,reflex:0.1,audioreach:"coin"});
 				}
 				
 				// Clear the screen with the gbox.blitFade function
@@ -460,7 +849,7 @@
 				blit: function() {
 					// Render the current sprite.. don't worry too much about what's going on here. We're pretty much doing
 					//  the default drawing function, sending along the tileset, the frame info, coordinates, whether the
-					//  spries is flipped, camera info, and the alpha transparency value
+					//  sprites are flipped, camera info, and the alpha transparency value
 					gbox.blitTile(gbox.getBufferContext(), {
 						tileset: this.tileset,
 						tile:    this.frame,
@@ -604,4 +993,3 @@
 			if ((obj.y - ycam) < (ybuf))                 gbox.setCameraY(ycam + (obj.y - ycam) - ybuf,                   viewdata);
 		}
   </script>
-</html>
