@@ -57,13 +57,16 @@
 			});
 		 
 			// Here we tell the game to look for an image called 'font.png' in the same directory as the HTML file and call it 'font' internally.
-			gbox.addImage('font', 'images/font.png');
+			gbox.addImage('font', 'resources/images/font.png');
 		 
-			// Same thing for our logo here.
-			gbox.addImage('logo', 'images/logo.png');
+			// Same thing for our group logo here.
+			gbox.addImage('logo', 'resources/images/logo.png');
+			
+			// Title image.
+			gbox.addImage('title', 'resources/images/title.png');
 			
 			// Adding our player spritesheet here
-			gbox.addImage('player_sprite', 'images/player_sprite.png');
+			gbox.addImage('player_sprite', 'resources/images/player_sprite.png');
 			// Sprites sheets are cut here, setting the tile size, the number of sprites per row and the gap of the frames set.
 			gbox.addTiles({
 				id:      'player_tiles', // set a unique ID for future reference
@@ -78,7 +81,7 @@
 			// Sprites sheets are cut here, setting the tile size, the number of sprites per row and the gap of the frames set.  gbox.addTiles({    id:      'player_tiles', // set a unique ID for future reference    image:   'player_sprite', // Use the 'sprites' image, as loaded above    tileh:   16,    tilew:   16,    tilerow: 1,    gapx:    0,    gapy:    0  });
 
 			// Add our map spritesheet, which gives us our "wall" pieces
-			gbox.addImage('map_spritesheet', 'images/map_pieces.png');
+			gbox.addImage('map_spritesheet', 'resources/images/map_pieces.png');
 		 
 			gbox.addTiles({
 				id:      'map_pieces',
@@ -90,7 +93,7 @@
 				gapy:    0
 			});
 			
-			gbox.addImage('enemy_sprite', 'images/enemy_sprite.png');
+			gbox.addImage('enemy_sprite', 'resources/images/enemy_sprite.png');
 
 			// Adding tiles for the enemy sprite
 			gbox.addTiles({
@@ -139,7 +142,7 @@
 				
 				// Set the animation using the toys.logos.linear function. We tell it to run this(maingame) using the 'rising' local data store and then pass it some data.
 				toys.logos.linear(this, 'rising', {
-					image: 'logo', // The image
+					image: 'title', // The image
 					sx:    gbox.getScreenW()/2-gbox.getImage('logo').width/2, // The source x coord where the image begins
 					sy:    gbox.getScreenH(), // The source y coord where the image begins
 					x:     gbox.getScreenW()/2-gbox.getImage('logo').width/2, // The destination x coord where the image ends
